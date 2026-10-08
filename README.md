@@ -12,6 +12,7 @@ Each action lives in its own directory with an `action.yml`, so it is referenced
 | `terraform/plan` | Terraform plan (planned) |
 | `terraform/apply` | Terraform apply (planned) |
 | `terraform/drift` | Terraform drift detection (planned) |
+| `security/gitleaks` | Scan for secrets with the gitleaks CLI |
 | `agent/` | Run a coding agent such as pi or hermes (planned) |
 
 ## Usage
