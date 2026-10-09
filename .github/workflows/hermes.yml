@@ -1,0 +1,38 @@
+name: hermes
+
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: Prompt for Hermes
+        required: true
+        type: string
+      model:
+        description: OpenRouter model id
+        required: false
+        default: anthropic/claude-haiku-5.5
+        type: string
+
+      pr-number:
+        description: PR number to comment the output on (leave empty to skip)
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./agent/hermes
+        with:
+          prompt: ${{ inputs.prompt }}
+          model: ${{ inputs.model }}
+          openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+          pr-number: ${{ inputs.pr-number }}

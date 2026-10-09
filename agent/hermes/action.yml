@@ -1,0 +1,95 @@
+name: Hermes
+description: Run a one-shot Hermes agent prompt against OpenRouter
+inputs:
+  prompt:
+    description: Prompt to send to Hermes
+    required: true
+  openrouter-api-key:
+    description: OpenRouter API key (pass from a secret, e.g. secrets.OPENROUTER_API_KEY)
+    required: true
+  model:
+    description: OpenRouter model id, e.g. anthropic/claude-haiku-5.5
+    default: anthropic/claude-haiku-5.5
+  reasoning-effort:
+    description: Thinking level written to agent.reasoning_effort (none, minimal, low, medium, high, xhigh)
+    default: high
+  max-turns:
+    description: Maximum tool-calling iterations for the run
+    default: "100"
+  pr-number:
+    description: PR number to post the Hermes output to as a comment (empty skips posting)
+    default: ""
+  yolo:
+    description: Skip Hermes approval prompts for dangerous commands (true/false). Required for unattended tool use.
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Install Hermes
+      shell: bash
+      run: |
+        set -euo pipefail
+        curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Run Hermes
+      shell: bash
+      env:
+        PROMPT: ${{ inputs.prompt }}
+        OPENROUTER_API_KEY: ${{ inputs.openrouter-api-key }}
+        MODEL: ${{ inputs.model }}
+        REASONING_EFFORT: ${{ inputs.reasoning-effort }}
+        MAX_TURNS: ${{ inputs.max-turns }}
+        YOLO: ${{ inputs.yolo }}
+      run: |
+        set -euo pipefail
+        if [ -z "$PROMPT" ]; then echo "prompt input is empty" >&2; exit 1; fi
+        if ! command -v hermes >/dev/null; then echo "hermes not found on PATH" >&2; exit 1; fi
+
+        prompt_file="${RUNNER_TEMP}/hermes-prompt.txt"
+        output_file="${RUNNER_TEMP}/hermes-output.txt"
+        printf '%s' "$PROMPT" > "$prompt_file"
+
+        # Reasoning effort is a config key, not a chat flag.
+        hermes config set agent.reasoning_effort "$REASONING_EFFORT"
+
+        # --query-file avoids shell quoting issues with the prompt text.
+        args=(chat --oneshot --quiet --provider openrouter --model "$MODEL"
+              --max-turns "$MAX_TURNS" --query-file "$prompt_file")
+        if [ "$YOLO" = "true" ]; then args+=(--yolo); fi
+
+        hermes "${args[@]}" | tee "$output_file"
+
+        {
+          echo "## Hermes output"
+          echo
+          echo '```'
+          cat "$output_file"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Post output to PR
+      if: inputs.pr-number != ''
+      shell: bash
+      env:
+        PR_NUMBER: ${{ inputs.pr-number }}
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        output_file="${RUNNER_TEMP}/hermes-output.txt"
+        body_file="${RUNNER_TEMP}/hermes-comment.md"
+
+        # GitHub rejects comments over 65536 characters; keep headroom.
+        max_bytes=60000
+        {
+          echo "## Hermes output"
+          echo
+          head -c "$max_bytes" "$output_file"
+          if [ "$(wc -c < "$output_file")" -gt "$max_bytes" ]; then
+            echo
+            echo "_Output truncated. See the job summary or logs for the full run._"
+          fi
+        } > "$body_file"
+
+        gh pr comment "$PR_NUMBER" --body-file "$body_file"
