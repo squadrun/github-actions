@@ -11,7 +11,7 @@ inputs:
     description: OpenRouter model id, e.g. anthropic/claude-haiku-5.5
     default: anthropic/claude-haiku-5.5
   reasoning-effort:
-    description: Thinking level written to agent.reasoning_effort (none, minimal, low, medium, high, xhigh)
+    description: Thinking level passed as --reasoning (none, minimal, low, medium, high, xhigh, max, ultra)
     default: high
   max-turns:
     description: Maximum tool-calling iterations for the run
@@ -50,12 +50,10 @@ runs:
         output_file="${RUNNER_TEMP}/hermes-output.txt"
         printf '%s' "$PROMPT" > "$prompt_file"
 
-        # Reasoning effort is a config key, not a chat flag.
-        hermes config set agent.reasoning_effort "$REASONING_EFFORT"
-
         # --query-file avoids shell quoting issues with the prompt text.
         args=(chat --oneshot --quiet --provider openrouter --model "$MODEL"
-              --max-turns "$MAX_TURNS" --query-file "$prompt_file")
+              --max-turns "$MAX_TURNS" --reasoning "$REASONING_EFFORT"
+              --query-file "$prompt_file")
         if [ "$YOLO" = "true" ]; then args+=(--yolo); fi
 
         hermes "${args[@]}" | tee "$output_file"
