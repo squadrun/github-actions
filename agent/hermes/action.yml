@@ -19,18 +19,52 @@ inputs:
   pr-number:
     description: PR number to post the Hermes output to as a comment (empty skips posting)
     default: ""
+  hermes-ref:
+    description: Hermes Agent commit SHA to install. Bump deliberately; changing it invalidates the install cache.
+    default: 63d0b94120027d487c9a5235b9ec64b696af1b26
   yolo:
     description: Skip Hermes approval prompts for dangerous commands (true/false). Required for unattended tool use.
     default: "false"
 runs:
   using: composite
   steps:
+    # Cache the install so reviews skip the ~2 minute build. Saved right after install,
+    # before any run, so it never contains sessions or run state.
+    - name: Restore Hermes install
+      id: hermes-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ~/.hermes
+          ~/.local/bin
+          ~/.local/share/uv
+        key: hermes-${{ runner.os }}-${{ runner.arch }}-${{ inputs.hermes-ref }}
+
     - name: Install Hermes
+      if: steps.hermes-cache.outputs.cache-hit != 'true'
       shell: bash
+      env:
+        HERMES_REF: ${{ inputs.hermes-ref }}
       run: |
         set -euo pipefail
-        curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
-        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        installer="${RUNNER_TEMP}/hermes-install.sh"
+        curl -fsSL https://hermes-agent.nousresearch.com/install.sh -o "$installer"
+        # Headless review: no browser, no computer-use driver, no prompts.
+        bash "$installer" --commit "$HERMES_REF" --non-interactive --skip-browser --skip-computer-use
+
+    - name: Save Hermes install
+      if: steps.hermes-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          ~/.hermes
+          ~/.local/bin
+          ~/.local/share/uv
+        key: hermes-${{ runner.os }}-${{ runner.arch }}-${{ inputs.hermes-ref }}
+
+    - name: Add Hermes to PATH
+      shell: bash
+      run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
     - name: Run Hermes
       shell: bash
