@@ -56,32 +56,52 @@ runs:
               --query-file "$prompt_file")
         if [ "$YOLO" = "true" ]; then args+=(--yolo); fi
 
-        hermes "${args[@]}" | tee "$output_file"
+        raw_file="${RUNNER_TEMP}/hermes-raw.txt"
+        hermes "${args[@]}" | tee "$raw_file"
+
+        # Quiet mode appends session info to the response; keep it out of the PR comment.
+        grep -v '^session_id: ' "$raw_file" > "$output_file" || true
+
+        # The runner is fresh, so a one-day window covers just this run.
+        stats_file="${RUNNER_TEMP}/hermes-stats.txt"
+        hermes insights --days 1 > "$stats_file" 2>&1 || true
 
         {
           echo "## Hermes output"
           echo
-          echo '```'
           cat "$output_file"
+          echo
+          echo "## Hermes usage"
+          echo
+          echo '```'
+          cat "$stats_file"
           echo '```'
         } >> "$GITHUB_STEP_SUMMARY"
+        echo "::group::Hermes usage"; cat "$stats_file"; echo "::endgroup::"
 
     - name: Post output to PR
       if: inputs.pr-number != ''
       shell: bash
       env:
         PR_NUMBER: ${{ inputs.pr-number }}
+        MODEL: ${{ inputs.model }}
         GH_TOKEN: ${{ github.token }}
         GH_REPO: ${{ github.repository }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: |
         set -euo pipefail
         output_file="${RUNNER_TEMP}/hermes-output.txt"
         body_file="${RUNNER_TEMP}/hermes-comment.md"
+        marker='<!-- hermes-review -->'
+
+        # The checkout is the PR head; github.sha would be the default branch for comment triggers.
+        sha=$(git rev-parse --short HEAD 2>/dev/null || echo "${GITHUB_SHA::7}")
 
         # GitHub rejects comments over 65536 characters; keep headroom.
         max_bytes=60000
         {
-          echo "## Hermes output"
+          echo "$marker"
+          echo "<sub>Hermes review of \`$sha\` · \`$MODEL\` · [run]($RUN_URL)</sub>"
           echo
           head -c "$max_bytes" "$output_file"
           if [ "$(wc -c < "$output_file")" -gt "$max_bytes" ]; then
@@ -90,4 +110,11 @@ runs:
           fi
         } > "$body_file"
 
-        gh pr comment "$PR_NUMBER" --body-file "$body_file"
+        # Update the previous Hermes comment in place instead of stacking a new one per run.
+        existing=$(gh api --paginate "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
+          --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | tail -n1)
+        if [ -n "$existing" ]; then
+          gh api --method PATCH "repos/$GH_REPO/issues/comments/$existing" -F body=@"$body_file" >/dev/null
+        else
+          gh pr comment "$PR_NUMBER" --body-file "$body_file"
+        fi
