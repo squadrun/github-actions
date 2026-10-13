@@ -13,6 +13,21 @@ on:
         default: anthropic/claude-haiku-5.5
         type: string
 
+      reasoning-effort:
+        description: Thinking level (none, minimal, low, medium, high, xhigh)
+        required: false
+        default: high
+        type: string
+      max-turns:
+        description: Maximum tool-calling iterations
+        required: false
+        default: "100"
+        type: string
+      yolo:
+        description: Skip approval prompts for dangerous commands
+        required: false
+        default: false
+        type: boolean
       pr-number:
         description: PR number to comment the output on (leave empty to skip)
         required: false
@@ -35,4 +50,7 @@ jobs:
           prompt: ${{ inputs.prompt }}
           model: ${{ inputs.model }}
           openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+          reasoning-effort: ${{ inputs.reasoning-effort }}
+          max-turns: ${{ inputs.max-turns }}
+          yolo: ${{ inputs.yolo }}
           pr-number: ${{ inputs.pr-number }}
