@@ -1,0 +1,35 @@
+# Copy to <repo>/.github/workflows/hermes-review.yml
+# Reviews each PR by following review.md at the repo root, then comments the result.
+name: hermes-review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: hermes-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Same-repo PRs only: forks get no secrets, and yolo + untrusted input is a prompt-injection risk.
+    if: github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: squadrun/github-actions/agent/hermes@<commit-sha>  # pin a SHA or tag, not main
+        with:
+          prompt: |
+            Review pull request #${{ github.event.pull_request.number }} in this repo.
+            Follow the instructions in review.md. Diff against origin/${{ github.base_ref }}.
+            Output only the review as markdown.
+          openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+          pr-number: ${{ github.event.pull_request.number }}
+          yolo: "true"
