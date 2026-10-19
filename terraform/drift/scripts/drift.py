@@ -223,15 +223,17 @@ def render_comment(marker, name, outcome, branch, working_directory, workspace):
         "",
         "```bash",
         f"git fetch origin {branch} && git checkout {branch}",
-        f"cd {working_directory} && terraform init && terraform workspace select {workspace or 'default'}",
-        "claude \"Terraform still has drift in this root. AWS is the source of truth: change only the "
-        "Terraform code (never AWS) until terraform plan shows no changes. Use import {} blocks for "
-        "resources that exist only in AWS and removed {} blocks for ones deleted from AWS, and ask me "
-        f"before removing anything. Remaining addresses: {addresses}\"",
+        f"claude \"Terraform root {working_directory} (workspace {workspace or 'default'}) still has drift; "
+        "the manual-steps comment on this branch's PR lists it. AWS is the source of truth: change only the "
+        "Terraform code, never AWS. Use import {} blocks for resources that exist only in AWS and removed {} "
+        "blocks for ones deleted from AWS, and ask me before removing anything. Read live values with "
+        "read-only aws CLI calls; do not run terraform plan or apply locally. "
+        f"Remaining addresses: {addresses}\"",
         "```",
         "",
-        "Push to this branch, then mark the PR ready for review. The next scheduled run rebuilds the "
-        "branch from `main`, so merge or close this PR before then.",
+        "Push to this branch: your push triggers the repo's normal PR plan, which should show no changes. "
+        "Then mark the PR ready for review. The next scheduled run rebuilds the branch from `main`, so "
+        "merge or close this PR before then.",
     ]
     return "\n".join(lines) + "\n"
 
