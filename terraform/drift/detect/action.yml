@@ -1,0 +1,90 @@
+name: Terraform drift detect
+description: Plan one Terraform root read-only and upload a redacted drift summary for the fix and pr steps
+inputs:
+  name:
+    description: Short name for this Terraform root (used in artifact and branch names), e.g. production
+    required: true
+  working-directory:
+    description: Terraform root directory
+    default: "."
+  workspace:
+    description: Terraform workspace to select (empty keeps the default workspace)
+    default: ""
+  terraform-version:
+    description: Terraform version to install
+    required: true
+  init-args:
+    description: Extra arguments for terraform init
+    default: "-upgrade"
+  branch-prefix:
+    description: Drift PR branches are named <branch-prefix><name>
+    default: drift/
+  github-token:
+    description: Token used to close a stale drift PR when drift is gone (needs pull-requests:write)
+    default: ${{ github.token }}
+outputs:
+  drift:
+    description: "true when the plan has changes"
+    value: ${{ steps.plan.outputs.drift }}
+runs:
+  using: composite
+  steps:
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.terraform-version }}
+        terraform_wrapper: false
+
+    - name: Plan
+      id: plan
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        OUT_DIR: ${{ runner.temp }}/drift
+        WORKSPACE: ${{ inputs.workspace }}
+        INIT_ARGS: ${{ inputs.init-args }}
+        TF_IN_AUTOMATION: "true"
+      run: |
+        set -euo pipefail
+        bash "$GITHUB_ACTION_PATH/../scripts/plan.sh"
+        drift=$(python3 -c 'import json,sys; print(str(json.load(open(sys.argv[1]))["has_drift"]).lower())' "$OUT_DIR/summary.json")
+        echo "drift=$drift" >> "$GITHUB_OUTPUT"
+
+    - name: Upload drift summary
+      uses: actions/upload-artifact@v4
+      with:
+        name: terraform-drift-${{ inputs.name }}
+        path: |
+          ${{ runner.temp }}/drift/summary.json
+          ${{ runner.temp }}/drift/plan.txt
+        retention-days: 7
+
+    - name: Close stale drift PR
+      if: steps.plan.outputs.drift == 'false'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GH_REPO: ${{ github.repository }}
+        BRANCH: ${{ inputs.branch-prefix }}${{ inputs.name }}
+      run: |
+        set -euo pipefail
+        pr=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+        if [ -n "$pr" ]; then
+          gh pr close "$pr" --comment "No drift left in \`$BRANCH\`'s root: AWS and code match on \`main\`. Closing."
+        fi
+
+    - name: Summary
+      shell: bash
+      env:
+        DRIFT: ${{ steps.plan.outputs.drift }}
+        NAME: ${{ inputs.name }}
+      run: |
+        set -euo pipefail
+        if [ "$DRIFT" = "true" ]; then
+          echo "### Terraform drift in \`$NAME\`" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -E '^\s+# ' "$RUNNER_TEMP/drift/plan.txt" | head -100 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "### No Terraform drift in \`$NAME\`" >> "$GITHUB_STEP_SUMMARY"
+        fi

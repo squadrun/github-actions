@@ -1,0 +1,139 @@
+name: Terraform drift fix
+description: Let Hermes edit Terraform code to match the drift summary, with no AWS access, and upload the patch
+inputs:
+  name:
+    description: Same name passed to terraform/drift/detect
+    required: true
+  working-directory:
+    description: Terraform root directory
+    default: "."
+  workspace:
+    description: Terraform workspace (only shown to the agent)
+    default: ""
+  terraform-version:
+    description: Terraform version for fmt and validate
+    required: true
+  openrouter-api-key:
+    description: OpenRouter API key for Hermes
+    required: true
+  model:
+    description: OpenRouter model id
+    default: anthropic/claude-sonnet-5.5
+  reasoning-effort:
+    description: Hermes reasoning level
+    default: high
+  max-turns:
+    description: Maximum Hermes tool-calling iterations
+    default: "150"
+outputs:
+  changed:
+    description: "true when Hermes produced a code change"
+    value: ${{ steps.collect.outputs.changed }}
+runs:
+  using: composite
+  steps:
+    - name: Download drift summary
+      uses: actions/download-artifact@v4
+      with:
+        name: terraform-drift-${{ inputs.name }}
+        path: ${{ runner.temp }}/drift
+
+    - name: Check for drift
+      id: check
+      shell: bash
+      run: |
+        set -euo pipefail
+        drift=$(python3 -c 'import json,sys; print(str(json.load(open(sys.argv[1]))["has_drift"]).lower())' "$RUNNER_TEMP/drift/summary.json")
+        echo "drift=$drift" >> "$GITHUB_OUTPUT"
+
+    # Hermes runs with yolo, so this job must not be able to reach AWS or push code.
+    - name: Refuse credentials
+      if: steps.check.outputs.drift == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -n "${AWS_ACCESS_KEY_ID:-}${AWS_PROFILE:-}${AWS_WEB_IDENTITY_TOKEN_FILE:-}${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+          echo "::error::Run terraform/drift/fix in a job without AWS credentials or id-token: write" >&2
+          exit 1
+        fi
+        git config --local --unset-all http.https://github.com/.extraheader || true
+
+    - name: Setup Terraform
+      if: steps.check.outputs.drift == 'true'
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.terraform-version }}
+        terraform_wrapper: false
+
+    - name: Init without backend
+      if: steps.check.outputs.drift == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: terraform init -input=false -backend=false
+
+    - name: Build prompt
+      id: prompt
+      if: steps.check.outputs.drift == 'true'
+      shell: bash
+      env:
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        WORKSPACE: ${{ inputs.workspace }}
+      run: |
+        set -euo pipefail
+        prompt_file="$RUNNER_TEMP/drift/prompt.md"
+        python3 "$GITHUB_ACTION_PATH/../scripts/drift.py" prompt \
+          --summary "$RUNNER_TEMP/drift/summary.json" \
+          --template "$GITHUB_ACTION_PATH/prompt.md" \
+          --working-directory "$WORKING_DIRECTORY" \
+          --workspace "$WORKSPACE" \
+          --report-path "$RUNNER_TEMP/drift/hermes-report.json" \
+          --out "$prompt_file"
+        delimiter="PROMPT_$(openssl rand -hex 8)"
+        { echo "prompt<<$delimiter"; cat "$prompt_file"; echo; echo "$delimiter"; } >> "$GITHUB_OUTPUT"
+
+    # Pinned like any third-party action: bump deliberately when agent/hermes changes.
+    - name: Hermes
+      if: steps.check.outputs.drift == 'true'
+      uses: squadrun/github-actions/agent/hermes@4fa03fdde10582f6b9f6b3d58096f6af6ee53f08
+      with:
+        prompt: ${{ steps.prompt.outputs.prompt }}
+        openrouter-api-key: ${{ inputs.openrouter-api-key }}
+        model: ${{ inputs.model }}
+        reasoning-effort: ${{ inputs.reasoning-effort }}
+        max-turns: ${{ inputs.max-turns }}
+        yolo: "true"
+
+    - name: Collect .tf changes
+      id: collect
+      if: steps.check.outputs.drift == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        out="$RUNNER_TEMP/drift"
+        # Only .tf files leave this job; anything else Hermes touched is dropped here.
+        git add -A -- '*.tf'
+        mapfile -t files < <(git diff --cached --name-only)
+        if [ "${#files[@]}" -gt 0 ]; then
+          terraform fmt -- "${files[@]}"
+          git add -- "${files[@]}"
+        fi
+        ignored=$(git status --porcelain --untracked-files=all | grep -v '^[AMDR] ' | grep -v '\.terraform' || true)
+        if [ -n "$ignored" ]; then
+          echo "::warning::Dropped non-.tf changes made by Hermes:"
+          echo "$ignored"
+        fi
+        git diff --cached --binary > "$out/drift.patch"
+        [ -f "$out/hermes-report.json" ] || echo '{}' > "$out/hermes-report.json"
+        cp "$RUNNER_TEMP/hermes-output.txt" "$out/hermes-output.txt" 2>/dev/null || touch "$out/hermes-output.txt"
+        echo "changed=$([ -s "$out/drift.patch" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+    - name: Upload fix
+      if: steps.check.outputs.drift == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: terraform-drift-fix-${{ inputs.name }}
+        path: |
+          ${{ runner.temp }}/drift/drift.patch
+          ${{ runner.temp }}/drift/hermes-report.json
+          ${{ runner.temp }}/drift/hermes-output.txt
+        retention-days: 7

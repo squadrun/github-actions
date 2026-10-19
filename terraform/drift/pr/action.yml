@@ -1,0 +1,122 @@
+name: Terraform drift PR
+description: Apply the drift fix, re-plan to check it, and open a ready PR (fully fixed) or a draft PR with manual steps
+inputs:
+  name:
+    description: Same name passed to terraform/drift/detect
+    required: true
+  working-directory:
+    description: Terraform root directory
+    default: "."
+  workspace:
+    description: Terraform workspace to select (empty keeps the default workspace)
+    default: ""
+  terraform-version:
+    description: Terraform version to install
+    required: true
+  init-args:
+    description: Extra arguments for terraform init
+    default: "-upgrade"
+  branch-prefix:
+    description: Drift PR branches are named <branch-prefix><name>
+    default: drift/
+  base-branch:
+    description: Branch the drift PR targets
+    default: main
+  github-token:
+    description: Token that pushes the branch and opens the PR (needs contents:write, pull-requests:write)
+    default: ${{ github.token }}
+outputs:
+  solved:
+    description: "true when the re-plan after the fix shows no changes"
+    value: ${{ steps.report.outputs.solved }}
+  pr-url:
+    description: URL of the drift PR
+    value: ${{ steps.publish.outputs.pr-url }}
+runs:
+  using: composite
+  steps:
+    - name: Download drift summary
+      uses: actions/download-artifact@v4
+      with:
+        name: terraform-drift-${{ inputs.name }}
+        path: ${{ runner.temp }}/drift/detect
+
+    - name: Check for drift
+      id: check
+      shell: bash
+      run: |
+        set -euo pipefail
+        drift=$(python3 -c 'import json,sys; print(str(json.load(open(sys.argv[1]))["has_drift"]).lower())' "$RUNNER_TEMP/drift/detect/summary.json")
+        echo "drift=$drift" >> "$GITHUB_OUTPUT"
+
+    - name: Download fix
+      if: steps.check.outputs.drift == 'true'
+      uses: actions/download-artifact@v4
+      with:
+        name: terraform-drift-fix-${{ inputs.name }}
+        path: ${{ runner.temp }}/drift/fix
+
+    - name: Apply fix
+      if: steps.check.outputs.drift == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        patch="$RUNNER_TEMP/drift/fix/drift.patch"
+        if [ -s "$patch" ]; then git apply --index "$patch"; fi
+
+    - name: Setup Terraform
+      if: steps.check.outputs.drift == 'true'
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.terraform-version }}
+        terraform_wrapper: false
+
+    - name: Re-plan
+      if: steps.check.outputs.drift == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        OUT_DIR: ${{ runner.temp }}/drift/residual
+        WORKSPACE: ${{ inputs.workspace }}
+        INIT_ARGS: ${{ inputs.init-args }}
+        TF_IN_AUTOMATION: "true"
+      run: bash "$GITHUB_ACTION_PATH/../scripts/plan.sh"
+
+    - name: Build PR text
+      id: report
+      if: steps.check.outputs.drift == 'true'
+      shell: bash
+      env:
+        NAME: ${{ inputs.name }}
+        BRANCH: ${{ inputs.branch-prefix }}${{ inputs.name }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        WORKSPACE: ${{ inputs.workspace }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        set -euo pipefail
+        d="$RUNNER_TEMP/drift"
+        python3 "$GITHUB_ACTION_PATH/../scripts/drift.py" report \
+          --name "$NAME" \
+          --before "$d/detect/summary.json" \
+          --after "$d/residual/summary.json" \
+          --hermes-report "$d/fix/hermes-report.json" \
+          --branch "$BRANCH" \
+          --working-directory "$WORKING_DIRECTORY" \
+          --workspace "$WORKSPACE" \
+          --run-url "$RUN_URL" \
+          --marker '<!-- terraform-drift -->' \
+          --out-dir "$d/pr" | tee -a "$GITHUB_STEP_SUMMARY" | sed -n 's/^solved=\([a-z]*\).*/solved=\1/p' >> "$GITHUB_OUTPUT"
+
+    - name: Publish PR
+      id: publish
+      if: steps.check.outputs.drift == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GH_REPO: ${{ github.repository }}
+        NAME: ${{ inputs.name }}
+        BRANCH: ${{ inputs.branch-prefix }}${{ inputs.name }}
+        BASE: ${{ inputs.base-branch }}
+        SOLVED: ${{ steps.report.outputs.solved }}
+        PR_DIR: ${{ runner.temp }}/drift/pr
+      run: bash "$GITHUB_ACTION_PATH/../scripts/publish.sh"
