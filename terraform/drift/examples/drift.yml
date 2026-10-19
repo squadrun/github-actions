@@ -1,0 +1,79 @@
+# Daily drift sync for one Terraform root. Copy to .github/workflows/terraform-drift.yml.
+#
+# Three jobs keep the agent away from credentials:
+#   detect  AWS access, read-only plan, uploads a redacted drift summary
+#   fix     no AWS access, Hermes edits .tf files, uploads a patch
+#   pr      AWS access, re-plans with the patch, opens a ready or draft PR
+#
+# Needs: secrets.OPENROUTER_API_KEY, secrets.AWS_ROLE_ARN, and the repo setting
+# "Allow GitHub Actions to create and approve pull requests".
+name: Terraform Drift
+
+on:
+  schedule:
+    - cron: "30 6 * * *" # 12:00 IST
+  workflow_dispatch:
+
+concurrency:
+  group: terraform-drift
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  TF_IN_AUTOMATION: true
+  TF_INPUT: false
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ap-south-1
+      - uses: squadrun/github-actions/terraform/drift/detect@<commit-sha>
+        with:
+          name: production
+          terraform-version: 1.16.5
+          workspace: ${{ vars.WORKSPACE_NAME }}
+
+  fix:
+    needs: detect
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: squadrun/github-actions/terraform/drift/fix@<commit-sha>
+        with:
+          name: production
+          terraform-version: 1.16.5
+          workspace: ${{ vars.WORKSPACE_NAME }}
+          openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+
+  pr:
+    needs: fix
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ap-south-1
+      - uses: squadrun/github-actions/terraform/drift/pr@<commit-sha>
+        with:
+          name: production
+          terraform-version: 1.16.5
+          workspace: ${{ vars.WORKSPACE_NAME }}

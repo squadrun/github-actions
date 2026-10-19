@@ -11,7 +11,7 @@ Each action lives in its own directory with an `action.yml`, so it is referenced
 |---|---|
 | `terraform/plan` | Terraform plan (planned) |
 | `terraform/apply` | Terraform apply (planned) |
-| `terraform/drift` | Terraform drift detection (planned) |
+| `terraform/drift/{detect,fix,pr}` | Daily drift sync: plan, let Hermes match code to AWS, open a PR. See [`terraform/README.md`](terraform/README.md) |
 | `security/gitleaks` | Scan for secrets with the gitleaks CLI |
 | `agent/hermes` | Run a one-shot Hermes agent prompt via OpenRouter |
 
