@@ -28,17 +28,33 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Identify Hermes install platform
+      id: hermes-platform
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -r /etc/os-release ]; then
+          . /etc/os-release
+          version="${ID}-${VERSION_ID}"
+        elif [ "$RUNNER_OS" = "macOS" ]; then
+          version="macos-$(sw_vers -productVersion)"
+        else
+          version="$(uname -sr | tr ' ' '-')"
+        fi
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
     # Cache the install so reviews skip the ~2 minute build. Saved right after install,
     # before any run, so it never contains sessions or run state.
+    # Native dependencies must not cross OS distribution/version boundaries.
     - name: Restore Hermes install
       id: hermes-cache
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v6
       with:
         path: |
           ~/.hermes
           ~/.local/bin
           ~/.local/share/uv
-        key: hermes-${{ runner.os }}-${{ runner.arch }}-${{ inputs.hermes-ref }}
+        key: hermes-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.hermes-platform.outputs.version }}-${{ inputs.hermes-ref }}
 
     - name: Install Hermes
       if: steps.hermes-cache.outputs.cache-hit != 'true'
@@ -54,13 +70,13 @@ runs:
 
     - name: Save Hermes install
       if: steps.hermes-cache.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       with:
         path: |
           ~/.hermes
           ~/.local/bin
           ~/.local/share/uv
-        key: hermes-${{ runner.os }}-${{ runner.arch }}-${{ inputs.hermes-ref }}
+        key: hermes-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.hermes-platform.outputs.version }}-${{ inputs.hermes-ref }}
 
     - name: Add Hermes to PATH
       shell: bash
