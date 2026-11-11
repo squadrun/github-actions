@@ -1,0 +1,38 @@
+name: Hermes setup smoke
+
+on:
+  push:
+    paths:
+      - agent/hermes/**
+      - .github/workflows/hermes-setup-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  warm:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    cache-mode: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./agent/hermes/setup
+        with:
+          save-cache: "true"
+
+  restore:
+    needs: warm
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    cache-mode: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./agent/hermes/setup
+        id: hermes
+        with:
+          save-cache: "false"
+      - name: Require a cache hit in a fresh read-only job
+        env:
+          CACHE_HIT: ${{ steps.hermes.outputs.cache-hit }}
+        run: test "$CACHE_HIT" = true
