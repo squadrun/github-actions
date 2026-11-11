@@ -96,22 +96,11 @@ runs:
         # Quiet mode appends session info to the response; keep it out of the PR comment.
         grep -v '^session_id: ' "$raw_file" > "$output_file" || true
 
-        # The runner is fresh, so a one-day window covers just this run.
-        stats_file="${RUNNER_TEMP}/hermes-stats.txt"
-        hermes insights --days 1 > "$stats_file" 2>&1 || true
-
         {
           echo "## Hermes output"
           echo
           cat "$output_file"
-          echo
-          echo "## Hermes usage"
-          echo
-          echo '```'
-          cat "$stats_file"
-          echo '```'
         } >> "$GITHUB_STEP_SUMMARY"
-        echo "::group::Hermes usage"; cat "$stats_file"; echo "::endgroup::"
 
     - name: Post output to PR
       if: inputs.pr-number != ''
