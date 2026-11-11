@@ -94,7 +94,7 @@ runs:
     # Pinned like any third-party action: bump deliberately when agent/hermes changes.
     - name: Hermes
       if: steps.check.outputs.drift == 'true'
-      uses: squadrun/github-actions/agent/hermes@c6568c2b99a81bac4f2cf3f1176e3a429de7e57d
+      uses: squadrun/github-actions/agent/hermes@ed9316114380fa7e6b0625582e2b3cb5525b78e0
       with:
         prompt: ${{ steps.prompt.outputs.prompt }}
         openrouter-api-key: ${{ inputs.openrouter-api-key }}
