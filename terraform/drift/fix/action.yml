@@ -33,7 +33,7 @@ runs:
   using: composite
   steps:
     - name: Download drift summary
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: terraform-drift-${{ inputs.name }}
         path: ${{ runner.temp }}/drift
@@ -60,7 +60,7 @@ runs:
 
     - name: Setup Terraform
       if: steps.check.outputs.drift == 'true'
-      uses: hashicorp/setup-terraform@v3
+      uses: hashicorp/setup-terraform@v4
       with:
         terraform_version: ${{ inputs.terraform-version }}
         terraform_wrapper: false
@@ -94,7 +94,7 @@ runs:
     # Pinned like any third-party action: bump deliberately when agent/hermes changes.
     - name: Hermes
       if: steps.check.outputs.drift == 'true'
-      uses: squadrun/github-actions/agent/hermes@4fa03fdde10582f6b9f6b3d58096f6af6ee53f08
+      uses: squadrun/github-actions/agent/hermes@c6568c2b99a81bac4f2cf3f1176e3a429de7e57d
       with:
         prompt: ${{ steps.prompt.outputs.prompt }}
         openrouter-api-key: ${{ inputs.openrouter-api-key }}
@@ -129,7 +129,7 @@ runs:
 
     - name: Upload fix
       if: steps.check.outputs.drift == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: terraform-drift-fix-${{ inputs.name }}
         path: |

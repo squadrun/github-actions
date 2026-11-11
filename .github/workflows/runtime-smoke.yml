@@ -1,0 +1,62 @@
+name: Runtime smoke
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, ubuntu-26.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.5
+          terraform_wrapper: false
+      - name: Verify Terraform and create fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          terraform version
+          mkdir -p "$RUNNER_TEMP/runtime-smoke"
+          printf 'runtime smoke\n' > "$RUNNER_TEMP/runtime-smoke/fixture.txt"
+      - uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/runtime-smoke
+          key: runtime-smoke-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Remove fixture before cache restore
+        run: rm "$RUNNER_TEMP/runtime-smoke/fixture.txt"
+      - uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/runtime-smoke
+          key: runtime-smoke-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          fail-on-cache-miss: true
+      - name: Verify cache contents
+        run: test "$(cat "$RUNNER_TEMP/runtime-smoke/fixture.txt")" = 'runtime smoke'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: runtime-smoke-${{ matrix.os }}
+          path: ${{ runner.temp }}/runtime-smoke/fixture.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  download:
+    needs: upload
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, ubuntu-26.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: runtime-smoke-${{ matrix.os }}
+          path: ${{ runner.temp }}/runtime-smoke
+      - name: Verify cross-job artifact contents
+        run: test "$(cat "$RUNNER_TEMP/runtime-smoke/fixture.txt")" = 'runtime smoke'

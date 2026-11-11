@@ -22,3 +22,17 @@ Each action lives in its own directory with an `action.yml`, so it is referenced
 ```
 
 Pin to a tag or SHA, not `main`.
+
+## Runners
+
+Workflows and examples use `ubuntu-26.04` explicitly. JavaScript dependencies use
+Node 24; self-hosted runners must be version `2.327.1` or newer. The custom actions
+are composite actions and do not select the caller's runner image.
+
+Hermes install caches include the OS distribution and version as well as the
+architecture and Hermes revision, so an Ubuntu 24.04 install cannot be restored
+on Ubuntu 26.04.
+
+When adopting this migration, update caller workflows to `ubuntu-26.04` and bump
+their pinned `squadrun/github-actions` SHAs to the reviewed migration commit.
+Existing SHA pins continue to use the old dependencies until updated.
