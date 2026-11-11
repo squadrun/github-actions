@@ -22,65 +22,21 @@ inputs:
   hermes-ref:
     description: Hermes Agent commit SHA to install. Bump deliberately; changing it invalidates the install cache.
     default: 63d0b94120027d487c9a5235b9ec64b696af1b26
+  save-cache:
+    description: Save a fresh install before running Hermes; disable in read-only review jobs
+    default: "true"
   yolo:
     description: Skip Hermes approval prompts for dangerous commands (true/false). Required for unattended tool use.
     default: "false"
 runs:
   using: composite
   steps:
-    - name: Identify Hermes install platform
-      id: hermes-platform
-      shell: bash
-      run: |
-        set -euo pipefail
-        if [ -r /etc/os-release ]; then
-          . /etc/os-release
-          version="${ID}-${VERSION_ID}"
-        elif [ "$RUNNER_OS" = "macOS" ]; then
-          version="macos-$(sw_vers -productVersion)"
-        else
-          version="$(uname -sr | tr ' ' '-')"
-        fi
-        echo "version=$version" >> "$GITHUB_OUTPUT"
-
-    # Cache the install so reviews skip the ~2 minute build. Saved right after install,
-    # before any run, so it never contains sessions or run state.
-    # Native dependencies must not cross OS distribution/version boundaries.
-    - name: Restore Hermes install
-      id: hermes-cache
-      uses: actions/cache/restore@v6
+    # Install/cache behavior is shared with trusted cache-warming workflows.
+    - name: Setup Hermes
+      uses: squadrun/github-actions/agent/hermes/setup@8a04f137aaeb7d47c6f1d45bdb1a228c02e0e9a8
       with:
-        path: |
-          ~/.hermes
-          ~/.local/bin
-          ~/.local/share/uv
-        key: hermes-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.hermes-platform.outputs.version }}-${{ inputs.hermes-ref }}
-
-    - name: Install Hermes
-      if: steps.hermes-cache.outputs.cache-hit != 'true'
-      shell: bash
-      env:
-        HERMES_REF: ${{ inputs.hermes-ref }}
-      run: |
-        set -euo pipefail
-        installer="${RUNNER_TEMP}/hermes-install.sh"
-        curl -fsSL https://hermes-agent.nousresearch.com/install.sh -o "$installer"
-        # Headless review: no browser, no computer-use driver, no prompts.
-        bash "$installer" --commit "$HERMES_REF" --non-interactive --skip-browser --skip-computer-use
-
-    - name: Save Hermes install
-      if: steps.hermes-cache.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v6
-      with:
-        path: |
-          ~/.hermes
-          ~/.local/bin
-          ~/.local/share/uv
-        key: hermes-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.hermes-platform.outputs.version }}-${{ inputs.hermes-ref }}
-
-    - name: Add Hermes to PATH
-      shell: bash
-      run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        hermes-ref: ${{ inputs.hermes-ref }}
+        save-cache: ${{ inputs.save-cache == 'true' && github.event_name != 'issue_comment' }}
 
     - name: Run Hermes
       shell: bash
