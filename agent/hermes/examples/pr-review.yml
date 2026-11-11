@@ -18,7 +18,7 @@ jobs:
   review:
     # Same-repo PRs only: forks get no secrets, and yolo + untrusted input is a prompt-injection risk.
     if: github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5

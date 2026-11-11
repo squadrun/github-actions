@@ -36,7 +36,7 @@ runs:
   using: composite
   steps:
     - name: Download drift summary
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: terraform-drift-${{ inputs.name }}
         path: ${{ runner.temp }}/drift/detect
@@ -51,7 +51,7 @@ runs:
 
     - name: Download fix
       if: steps.check.outputs.drift == 'true'
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: terraform-drift-fix-${{ inputs.name }}
         path: ${{ runner.temp }}/drift/fix
@@ -66,7 +66,7 @@ runs:
 
     - name: Setup Terraform
       if: steps.check.outputs.drift == 'true'
-      uses: hashicorp/setup-terraform@v3
+      uses: hashicorp/setup-terraform@v4
       with:
         terraform_version: ${{ inputs.terraform-version }}
         terraform_wrapper: false

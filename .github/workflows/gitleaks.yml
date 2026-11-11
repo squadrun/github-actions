@@ -11,9 +11,9 @@ permissions:
 jobs:
   scan:
     name: gitleaks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: ./security/gitleaks
